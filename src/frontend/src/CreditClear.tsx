@@ -49,6 +49,7 @@ async function venice(
   sys: string,
   usr: string,
   temp = 0.3,
+  model = "llama-3.3-70b-e2ee",
 ): Promise<string> {
   const r = await fetch(VURL, {
     method: "POST",
@@ -57,7 +58,7 @@ async function venice(
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b",
+      model: model,
       messages: [
         { role: "system", content: sys },
         { role: "user", content: usr },
@@ -96,12 +97,14 @@ interface FlaggedItem {
 async function analyzeReport(
   key: string,
   text: string,
+  model: string,
 ): Promise<FlaggedItem[]> {
   const raw = await venice(
     key,
     ANALYSIS_SYS,
     `Analyze this credit report and identify ALL disputable items. Return ONLY a JSON array.\n\nCREDIT REPORT:\n\n${text}`,
     0.2,
+    model,
   );
   const s = raw.indexOf("[");
   const e = raw.lastIndexOf("]");
@@ -127,6 +130,7 @@ async function genLetter(
   bureau: string,
   target: string,
   fi: Furnisher,
+  model: string,
 ): Promise<string> {
   const bd = BUREAUS.find((b) => b.id === bureau);
   const p = `Generate a formal FCRA dispute letter:\n\nCONSUMER:\n- Name: ${ci.fullName}\n- Address: ${ci.address}\n- City/State/ZIP: ${ci.cityStateZip}\n- SSN Last 4: ${ci.ssnLast4 || "XXXX"}\n\nTARGET: ${
@@ -134,7 +138,7 @@ async function genLetter(
       ? `Credit Bureau — ${bd?.name}\n${bd?.address}`
       : `Furnisher — ${fi?.name || item.account}\n${fi?.address || "[ADDRESS]"}`
   }\n\nDISPUTED ITEM:\n- Account: ${item.account}\n- Account #: ${item.accountNumber || "[ACCOUNT NUMBER]"}\n- Issue: ${item.issueLabel}\n- Details: ${item.explanation}\n- FCRA Sections: ${item.fcraSections}\n\nThis is a ${target === "bureau" ? "§611 CRA dispute" : "§623(b) furnisher dispute"}.\nToday: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.\nOutput ONLY the letter.`;
-  return await venice(key, LETTER_SYS, p, 0.3);
+  return await venice(key, LETTER_SYS, p, 0.3, model);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -367,6 +371,7 @@ export default function CreditClear() {
   const [letters, setLetters] = useState<LetterResult[]>([]);
   const [genProg, setGenProg] = useState({ c: 0, t: 0 });
   const [genErr, setGenErr] = useState<string | null>(null);
+  const [veniceModel, setVeniceModel] = useState("llama-3.3-70b-e2ee");
   const [wizStep, setWizStep] = useState(0);
   const [copied, setCopied] = useState<number | "all" | null>(null);
   const [viewLetter, setViewLetter] = useState<number | null>(null);
@@ -378,9 +383,10 @@ export default function CreditClear() {
   useEffect(() => {
     (async () => {
       try {
-        const [cls, disp] = await Promise.all([
+        const [cls, disp, savedModel] = await Promise.all([
           actor!.getAllClients(),
           actor!.getAllDisputes(),
+          (actor as any).getVeniceModel(),
         ]);
         setClients(
           cls.map((c) => ({
@@ -398,6 +404,7 @@ export default function CreditClear() {
             daysLeft: Number(d.daysLeft),
           })),
         );
+        if (savedModel.length > 0) setVeniceModel(savedModel[0]);
       } catch (e) {
         console.error("Load error", e);
         toast.error("Failed to load data from backend.");
@@ -408,6 +415,15 @@ export default function CreditClear() {
   }, [actor]);
 
   // ── Client CRUD ──
+  const saveModel = async (m: string) => {
+    setVeniceModel(m);
+    try {
+      await (actor as any).setVeniceModel(m);
+    } catch (e) {
+      console.error("Failed to save model", e);
+    }
+  };
+
   const addClient = async () => {
     if (!clientForm.fullName.trim()) return;
     const now = new Date().toISOString();
@@ -538,7 +554,11 @@ export default function CreditClear() {
     setAnalysisErr(null);
     setFlagged(null);
     try {
-      const items = await analyzeReport(HARDCODED_KEY, reportText.trim());
+      const items = await analyzeReport(
+        HARDCODED_KEY,
+        reportText.trim(),
+        veniceModel,
+      );
       setFlagged(items);
       setSelected(new Set(items.map((_, i) => i)));
       setWizStep(1);
@@ -584,6 +604,7 @@ export default function CreditClear() {
           selBureau,
           disputeTarget,
           furnisher,
+          veniceModel,
         );
         out.push({ item: items[i], text: t, error: null });
       } catch (e: unknown) {
@@ -753,6 +774,7 @@ export default function CreditClear() {
                   ["fcra", "FCRA"],
                   ["croa", "CROA"],
                   ["checklist", "Checklist"],
+                  ["settings", "Settings"],
                 ] as [string, string][]
               ).map(([id, lb]) => (
                 <button
@@ -976,7 +998,7 @@ export default function CreditClear() {
                             className="btn-icon"
                             title="Analyze Report"
                             onClick={() => startAnalysisForClient(c)}
-                            data-ocid={`clients.edit_button.${idx + 1}`}
+                            data-ocid={`clients.edit_button.$idx + 1`}
                           >
                             🔍
                           </button>
@@ -993,7 +1015,7 @@ export default function CreditClear() {
                             className="btn-icon"
                             title="Delete"
                             onClick={() => {
-                              if (confirm(`Delete ${c.fullName}?`))
+                              if (confirm(`Delete $c.fullName?`))
                                 deleteClient(c.id);
                             }}
                             data-ocid={`clients.delete_button.${idx + 1}`}
@@ -1309,13 +1331,13 @@ export default function CreditClear() {
                           const sel = selected.has(idx);
                           return (
                             <div
-                              key={`${it.account}-${idx}`}
-                              className={`flag-card${sel ? " selected" : ""}`}
+                              key={`${it.account}-$idx`}
+                              className={`flag-card$sel ? " selected" : ""`}
                               onClick={() => toggleItem(idx)}
-                              data-ocid={`analyze.item.${idx + 1}`}
+                              data-ocid={`analyze.item.$idx + 1`}
                             >
                               <div className="flag-top">
-                                <div className={`flag-chk${sel ? " on" : ""}`}>
+                                <div className={`flag-chk$sel ? " on" : ""`}>
                                   {sel ? "✓" : ""}
                                 </div>
                                 <span
@@ -1378,7 +1400,7 @@ export default function CreditClear() {
                   <p className="step-desc">Who should the letters go to?</p>
                   <div className="target-row">
                     <div
-                      className={`tcard${disputeTarget === "bureau" ? " on" : ""}`}
+                      className={`tcard$disputeTarget === "bureau" ? " on" : ""`}
                       onClick={() => setDisputeTarget("bureau")}
                     >
                       <div className="ti">🏛</div>
@@ -1386,7 +1408,7 @@ export default function CreditClear() {
                       <div className="td">§611</div>
                     </div>
                     <div
-                      className={`tcard${disputeTarget === "furnisher" ? " on" : ""}`}
+                      className={`tcard$disputeTarget === "furnisher" ? " on" : ""`}
                       onClick={() => setDisputeTarget("furnisher")}
                     >
                       <div className="ti">🏦</div>
@@ -1406,7 +1428,7 @@ export default function CreditClear() {
                         {BUREAUS.map((b) => (
                           <div
                             key={b.id}
-                            className={`bchip${selBureau === b.id ? " on" : ""}`}
+                            className={`bchip$selBureau === b.id ? " on" : ""`}
                             onClick={() => setSelBureau(b.id)}
                           >
                             <div className="bn">{b.name}</div>
@@ -1511,7 +1533,7 @@ export default function CreditClear() {
                   <div className="prog-bar">
                     <div
                       className="prog-fill"
-                      style={{ width: `${(genProg.c / genProg.t) * 100}%` }}
+                      style={{ width: `$(genProg.c / genProg.t) * 100%` }}
                     />
                   </div>
                 </div>
@@ -1801,6 +1823,86 @@ export default function CreditClear() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "settings" && (
+            <div className="fu">
+              <div className="sh">
+                <div>
+                  <h2>Settings</h2>
+                  <p>AI model and preferences</p>
+                </div>
+              </div>
+              <div className="card" style={{ maxWidth: 520 }}>
+                <div style={{ marginBottom: 20 }}>
+                  <div className="lbl" style={{ marginBottom: 6 }}>
+                    Venice AI Model
+                  </div>
+                  <select
+                    className="fi"
+                    value={veniceModel}
+                    onChange={(e) => saveModel(e.target.value)}
+                    data-ocid="settings.model.select"
+                  >
+                    <option value="llama-3.3-70b">
+                      llama-3.3-70b — Standard (fast)
+                    </option>
+                    <option value="llama-3.3-70b-e2ee">
+                      llama-3.3-70b-e2ee — End-to-end encrypted (private)
+                    </option>
+                  </select>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      fontSize: 12,
+                      color: "var(--t3)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    E2EE models require Venice Pro. Get it at{" "}
+                    <a
+                      href="https://venice.ai"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "var(--gold)", textDecoration: "none" }}
+                    >
+                      venice.ai
+                    </a>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    background: "var(--bg-1)",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: "var(--t2)",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <strong style={{ color: "var(--t1)" }}>Current model:</strong>{" "}
+                  <span
+                    style={{
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      color: "var(--gold)",
+                    }}
+                  >
+                    {veniceModel}
+                  </span>
+                  <br />
+                  <span
+                    style={{
+                      color: "var(--t3)",
+                      marginTop: 4,
+                      display: "block",
+                    }}
+                  >
+                    Your preference is saved to ICP and persists across
+                    sessions.
+                  </span>
+                </div>
               </div>
             </div>
           )}

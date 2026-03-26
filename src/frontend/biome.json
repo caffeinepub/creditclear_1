@@ -31,7 +31,8 @@
       },
       "style": {
         "useConst": "off",
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "noUnusedTemplateLiteral": "off"
       },
       "a11y": {
         "useKeyWithClickEvents": "off"

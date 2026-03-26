@@ -68,6 +68,8 @@ export const idlService = IDL.Service({
   'setApiKey' : IDL.Func([IDL.Text], [], []),
   'updateClient' : IDL.Func([Client], [], []),
   'updateDisputeStatus' : IDL.Func([IDL.Nat, Status], [], []),
+  'getVeniceModel' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
+  'setVeniceModel' : IDL.Func([IDL.Text], [], []),
 });
 
 export const idlInitArgs = [];

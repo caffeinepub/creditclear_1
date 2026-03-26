@@ -80,6 +80,8 @@ actor {
 
   let userData = Map.empty<Principal, UserData>();
   let userProfiles = Map.empty<Principal, UserProfile>();
+  // Stored separately to avoid stable variable migration issues
+  let veniceModels = Map.empty<Principal, Text>();
 
   func getUserState(p : Principal) : UserData {
     switch (userData.get(p)) {
@@ -241,5 +243,20 @@ actor {
       Runtime.trap("Unauthorized: Only users can view API keys");
     };
     getUserState(caller).apiKey;
+  };
+
+  // Venice Model Preference (stored in separate map to preserve stable variable compatibility)
+  public shared ({ caller }) func setVeniceModel(model : Text) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can set model preferences");
+    };
+    veniceModels.add(caller, model);
+  };
+
+  public query ({ caller }) func getVeniceModel() : async ?Text {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view model preferences");
+    };
+    veniceModels.get(caller);
   };
 };

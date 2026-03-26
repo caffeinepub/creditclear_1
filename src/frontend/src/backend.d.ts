@@ -63,4 +63,6 @@ export interface backendInterface {
     setApiKey(key: string): Promise<void>;
     updateClient(client: Client): Promise<void>;
     updateDisputeStatus(id: bigint, status: Status): Promise<void>;
+    getVeniceModel(): Promise<[] | [string]>;
+    setVeniceModel(model: string): Promise<void>;
 }

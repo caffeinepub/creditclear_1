@@ -61,6 +61,8 @@ export interface _SERVICE {
   'setApiKey' : ActorMethod<[string], undefined>,
   'updateClient' : ActorMethod<[Client], undefined>,
   'updateDisputeStatus' : ActorMethod<[bigint, Status], undefined>,
+  'getVeniceModel' : ActorMethod<[], [] | [string]>,
+  'setVeniceModel' : ActorMethod<[string], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];
